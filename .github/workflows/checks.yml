@@ -1,0 +1,31 @@
+# Проверяет работы на трёх системах после каждой отправки кода.
+# Сами проверки лежат в checks/run_checks.py: преподаватель дополняет их от пары к паре.
+# Результат: вкладка Actions → «Проверки» → запуск → Summary.
+name: Проверки
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Компилятор MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Проверки
+        env:
+          PYTHONUTF8: "1"
+        run: python checks/run_checks.py

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+# сборка C
+*.exe
+*.obj
+*.o
+*.pdb
+*.ilk
+*.dll
+*.so
+*.dylib
+build/
+labs/*/hello
+labs/*/debug
+labs/*/libs
+*.dSYM/
+# система и редакторы
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+# настройки отладки лабораторных сдаются вместе с работой (ЛР 2)
+!labs/*/.vscode/
