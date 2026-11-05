@@ -7,6 +7,7 @@
 1. Лабораторные работы, у которых есть код: программа собирается и печатает
    ожидаемую строку. Код для другой системы пропускается (hello.c с windows.h
    собирается только в Windows, с unistd.h — только в macOS и Linux).
+   Снимки экрана лабораторных: заглушки в screenshots/ заменены своими снимками.
 2. Проверки агента-сторожа. Каждая открывается на своей паре; до этого она
    отмечена как «ещё не открыта» и на результат не влияет.
 
@@ -159,6 +160,33 @@ def check_lab03():
     return [("ЛР 3", "libs.c", "ошибка", f"нет строки «{LAB03_LINE}» в выводе")], False
 
 
+LABS = ("01-process-inside", "02-debugger", "03-libraries")
+PLACEHOLDER = b"sysprog-placeholder"  # метка в заглушках шаблона, у снимка её нет
+IMAGE_START = (b"\x89PNG", b"\xff\xd8\xff")
+
+
+def check_screenshots():
+    """Снимки лабораторных: каждый файл screenshots/*.png — картинка, и не заглушка из шаблона."""
+    rows, ok = [], True
+    for n, lab in enumerate(LABS, 1):
+        files = sorted((ROOT / "labs" / lab / "screenshots").glob("*.png"))
+        if not files:
+            continue
+        data = {f.name: f.read_bytes() for f in files}
+        broken = [name for name, b in data.items() if not b.startswith(IMAGE_START)]
+        left = [name[:2] for name, b in data.items() if PLACEHOLDER in b]
+        if broken:
+            ok = False
+            rows.append((f"ЛР {n}", "screenshots/", "ошибка", "файл не картинка: " + ", ".join(broken)))
+        elif len(left) == len(files):
+            rows.append((f"ЛР {n}", "screenshots/", "не сдано", f"снимков 0 из {len(files)}"))
+        elif left:
+            rows.append((f"ЛР {n}", "screenshots/", "не сдано", f"снимков {len(files) - len(left)} из {len(files)}, остались заглушки " + ", ".join(left)))
+        else:
+            rows.append((f"ЛР {n}", "screenshots/", "пройдено", f"снимков {len(files)} из {len(files)}"))
+    return rows, ok
+
+
 def system_uptime():
     """Секунды с запуска системы — тем способом, которым их не считает агент студента."""
     if SYSTEM == "win":
@@ -237,8 +265,9 @@ def main():
     rows3, ok3 = check_lab03()
     rows4, ok4 = check_module1_agent()
     rows5, ok5 = check_module1_ai()
-    rows += rows2 + rows3 + rows4 + rows5
-    ok = ok and ok2 and ok3 and ok4 and ok5
+    rows6, ok6 = check_screenshots()
+    rows += rows2 + rows3 + rows6 + rows4 + rows5
+    ok = ok and ok2 and ok3 and ok4 and ok5 and ok6
     passed = 0  # проверки агента появятся с пары 4
     lines = [f"## Проверки · {SYSTEM_NAME}", "",
              "| Работа | Файл | Результат | Подробности |", "|---|---|---|---|"]
