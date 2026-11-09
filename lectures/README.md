@@ -14,3 +14,4 @@
 | 1.2 | [C и Python вместе: библиотека и ctypes](chapter-1-2-c-and-python.md) |
 | 1.3 | [n8n и Ollama: первая автоматизация](chapter-1-3-n8n-and-ollama.md) |
 | 2.1 | [Список процессов](chapter-2-1-process-list.md) |
+| 2.2 | [Запуск процесса](chapter-2-2-process-start.md) |

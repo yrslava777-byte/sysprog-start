@@ -9,6 +9,7 @@
 | [`02-debugger`](02-debugger/README.md) | [ЛР 2. Программа в отладчике](https://maximbytecamp.github.io/sysprog_makarov/temy/09-laboratornaya-2/index.html) | 2 |
 | [`03-libraries`](03-libraries/README.md) | [ЛР 3. Библиотеки программы](https://maximbytecamp.github.io/sysprog_makarov/temy/10-laboratornaya-3/index.html) | 3 |
 | [`04-process-tree`](04-process-tree/README.md) | [ЛР 4. Дерево процессов](https://maximbytecamp.github.io/sysprog_makarov/temy/13-laboratornaya-4/index.html) | 4 |
+| [`05-process-birth`](05-process-birth/README.md) | [ЛР 5. Рождение процесса](https://maximbytecamp.github.io/sysprog_makarov/temy/15-laboratornaya-5/index.html) | 5 |
 
 ## Что лежит в папке работы
 

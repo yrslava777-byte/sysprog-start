@@ -43,7 +43,7 @@ AGENT_CHECKS = [
     (12, 21, "Подключено новое устройство"),
     (13, 22, "Запущена программа без подписи или не из пакета"),
 ]
-OPENED = 0  # сколько проверок агента уже открыто; растёт с каждой парой
+OPENED = 1  # сколько проверок агента уже открыто; растёт с каждой парой
 
 PID_LINE = re.compile(r"agent v0(?: \(python\))?, pid= ?\d+")
 
@@ -160,7 +160,7 @@ def check_lab03():
     return [("ЛР 3", "libs.c", "ошибка", f"нет строки «{LAB03_LINE}» в выводе")], False
 
 
-LABS = ("01-process-inside", "02-debugger", "03-libraries", "04-process-tree")
+LABS = ("01-process-inside", "02-debugger", "03-libraries", "04-process-tree", "05-process-birth")
 PLACEHOLDER = b"sysprog-placeholder"  # метка в заглушках шаблона, у снимка её нет
 IMAGE_START = (b"\x89PNG", b"\xff\xd8\xff")
 
@@ -201,25 +201,66 @@ def system_uptime():
     return int(float(Path("/proc/uptime").read_text().split()[0]))
 
 
+CORE = ROOT / "agent" / "core"
+LIB_NAME = {"win": "sentry_core.dll", "mac": "libsentry_core.dylib", "linux": "libsentry_core.so"}[SYSTEM]
+
+
+def target_of_core(text):
+    """Для какой системы файл ядра: core_info.c общий для macOS и Linux, core_procs.c у каждой свой."""
+    if "windows.h" in text:
+        return "win"
+    if "libproc.h" in text:
+        return "mac"
+    if "/proc" in text:
+        return "linux"
+    return "posix"
+
+
+def fits_core(target):
+    return target == SYSTEM or (target == "posix" and SYSTEM != "win")
+
+
+_core = {}
+
+
+def build_core():
+    """Собирает библиотеку ядра из всех agent/core/*.c без main — так же, как в главах.
+
+    Возвращает (функции ядра в исходниках, ошибка): ошибка — None, если библиотека собрана,
+    иначе строка таблицы. Собирается один раз за запуск.
+    """
+    if "result" in _core:
+        return _core["result"]
+    texts = {f: f.read_text(encoding="utf-8", errors="replace") for f in sorted(CORE.glob("*.c"))}
+    texts = {f: t for f, t in texts.items() if "int main" not in t}
+    funcs = {name for name in ("core_get_info", "core_list_procs") if any(name in t for t in texts.values())}
+    other = [f.name for f, t in texts.items() if not fits_core(target_of_core(t))]
+    if not texts:
+        err = ("agent/core", "не сдано", "нет файлов ядра agent/core/*.c")
+    elif other:
+        err = (", ".join(other), "пропущено", f"ядро для другой системы, {SYSTEM_NAME} его не собирает")
+    else:
+        src = [f.name for f in texts]
+        if SYSTEM == "win":
+            r = run(["cl", "/nologo", "/LD", *src, f"/Fe:{LIB_NAME}"], cwd=CORE)
+        elif SYSTEM == "mac":
+            r = run(["clang", "-shared", "-fPIC", "-o", LIB_NAME, *src], cwd=CORE)
+        else:
+            r = run(["gcc", "-shared", "-fPIC", "-o", LIB_NAME, *src], cwd=CORE)
+        err = None if r.returncode == 0 else (
+            " ".join(src), "ошибка", "ядро не собирается: " + (r.stdout + r.stderr).strip().splitlines()[-1][:150])
+    _core["result"] = funcs, err
+    return funcs, err
+
+
 def check_module1_agent():
     """Модуль 1, задание «Агент»: ядро собирается в библиотеку, brain.py печатает JSON с полем uptime_s."""
-    core, brain = ROOT / "agent" / "core", ROOT / "agent" / "brain" / "brain.py"
-    sources = [f for f in core.glob("*.c") if "core_get_info" in f.read_text(encoding="utf-8", errors="replace")
-               and "int main" not in f.read_text(encoding="utf-8", errors="replace")]
-    if not sources or not brain.exists():
+    brain = ROOT / "agent" / "brain" / "brain.py"
+    funcs, err = build_core()
+    if "core_get_info" not in funcs or not brain.exists():
         return [("Модуль 1", "agent", "не сдано", "нет agent/core/*.c с core_get_info или agent/brain/brain.py")], True
-    mine = [f for f in sources if fits(target_of_c(f.read_text(encoding="utf-8", errors="replace")))]
-    if not mine:
-        return [("Модуль 1", "agent", "пропущено", f"ядро для другой системы, {SYSTEM_NAME} его не собирает")], True
-    src = mine[0]
-    if SYSTEM == "win":
-        r = run(["cl", "/nologo", "/LD", str(src), "/Fe:sentry_core.dll", "/Fo:" + str(core) + "\\"], cwd=core)
-    elif SYSTEM == "mac":
-        r = run(["clang", "-shared", "-fPIC", "-o", "libsentry_core.dylib", str(src)], cwd=core)
-    else:
-        r = run(["gcc", "-shared", "-fPIC", "-o", "libsentry_core.so", str(src)], cwd=core)
-    if r.returncode != 0:
-        return [("Модуль 1", src.name, "ошибка", "ядро не собирается: " + (r.stdout + r.stderr).strip().splitlines()[-1][:150])], False
+    if err:
+        return [("Модуль 1", *err)], err[1] != "ошибка"
     r = run([sys.executable, str(brain)])
     try:
         msg = json.loads(r.stdout)
@@ -257,6 +298,72 @@ def check_module1_ai():
     return [("Модуль 1", "agent/n8n", "пройдено", f"узлов в сценарии: {len(nodes)}")], True
 
 
+def system_procs():
+    """PID → PPID всех процессов по программе системы, а не по ядру студента."""
+    if SYSTEM == "win":
+        cmd = ["powershell", "-NoProfile", "-Command",
+               "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }"]
+        name = "Win32_Process"
+    else:
+        cmd, name = ["ps", "-A", "-o", "pid=,ppid="], "ps"
+    pairs = [line.split() for line in run(cmd).stdout.splitlines()]
+    return {int(p[0]): int(p[1]) for p in pairs if len(p) == 2}, name
+
+
+def check_agent1():
+    """Проверка агента 1 (пара 4): core_list_procs находит те же процессы, что программа системы.
+
+    Возвращает (результат, подробности, ok); результат — «пройдена», «не пройдена», «не сдано», «пропущено».
+    """
+    import ctypes
+    funcs, err = build_core()
+    if "core_list_procs" not in funcs:
+        return "не сдано", "нет agent/core/*.c с core_list_procs", True
+    if err:
+        return ("пропущено", err[2], True) if err[1] == "пропущено" else ("не пройдена", err[2], False)
+
+    class CoreProc(ctypes.Structure):
+        _fields_ = [("pid", ctypes.c_int64), ("ppid", ctypes.c_int64), ("name", ctypes.c_char * 64)]
+
+    try:
+        lib = ctypes.CDLL(str(CORE / LIB_NAME))
+        lib.core_list_procs.argtypes = [ctypes.POINTER(CoreProc), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
+        lib.core_list_procs.restype = ctypes.c_int
+    except (OSError, AttributeError) as e:
+        return "не пройдена", f"библиотека не загружается: {e}"[:150], False
+    too_small = 122 if SYSTEM == "win" else 34  # ERROR_INSUFFICIENT_BUFFER / ERANGE
+
+    one, count = (CoreProc * 1)(), ctypes.c_int32()
+    code = lib.core_list_procs(one, 1, ctypes.byref(count))
+    if code != too_small or count.value <= 1:
+        return "не пройдена", f"при max = 1 ядро вернуло {code} и count = {count.value}, ждали {too_small} и число процессов", False
+    room = count.value + 64
+    buf = (CoreProc * room)()
+    code = lib.core_list_procs(buf, room, ctypes.byref(count))
+    if code != 0:
+        return "не пройдена", f"при max = {room} ядро вернуло {code}", False
+    core = {p.pid: (p.ppid, p.name.decode("utf-8", "replace")) for p in buf[:count.value]}
+    real, tool = system_procs()
+
+    me = core.get(os.getpid())
+    if me is None:
+        return "не пройдена", f"в списке ядра нет процесса проверки, pid = {os.getpid()}", False
+    if me[0] != os.getppid() or "python" not in me[1].lower():
+        return "не пройдена", f"процесс проверки: ppid = {me[0]}, name = «{me[1]}», ждали ppid = {os.getppid()} и имя python", False
+    common = core.keys() & real.keys()
+    same_parent = sum(core[pid][0] == real[pid] for pid in common)
+    detail = f"ядро {len(core)}, {tool} {len(real)}, общих {len(common)}, родитель совпал у {same_parent}"
+    # Списки сняты с разницей в доли секунды: часть процессов успевает появиться или завершиться.
+    spare = max(5, len(real) // 10)
+    if len(real.keys() - core.keys()) > spare:
+        return "не пройдена", detail + " — ядро находит не все процессы", False
+    if len(core.keys() - real.keys()) > spare:
+        return "не пройдена", detail + " — в списке ядра процессы, которых нет в системе", False
+    if same_parent < 0.95 * len(common):
+        return "не пройдена", detail + " — ppid отличается от системного", False
+    return "пройдена", detail, True
+
+
 def main():
     # Консоль Windows по умолчанию в cp1252: русский текст выводится в UTF-8.
     sys.stdout.reconfigure(encoding="utf-8")
@@ -268,15 +375,17 @@ def main():
     rows6, ok6 = check_screenshots()
     rows += rows2 + rows3 + rows6 + rows4 + rows5
     ok = ok and ok2 and ok3 and ok4 and ok5 and ok6
-    passed = 0  # проверки агента появятся с пары 4
+    agent = {1: check_agent1()}
+    ok = ok and all(a_ok for _, _, a_ok in agent.values())
+    passed = sum(state == "пройдена" for state, _, _ in agent.values())
     lines = [f"## Проверки · {SYSTEM_NAME}", "",
              "| Работа | Файл | Результат | Подробности |", "|---|---|---|---|"]
     lines += [f"| {a} | `{b}` | {c} | {d} |" for a, b, c, d in rows]
     lines += ["", f"### Агент-сторож: проверок пройдено {passed} / {len(AGENT_CHECKS)}", "",
-              "| № | Пара | Проверка | Результат |", "|---|---|---|---|"]
+              "| № | Пара | Проверка | Результат | Подробности |", "|---|---|---|---|---|"]
     for n, pair, name in AGENT_CHECKS:
-        state = "ещё не открыта" if n > OPENED else "не пройдена"
-        lines.append(f"| {n} | {pair} | {name} | {state} |")
+        state, detail, _ = agent.get(n, ("ещё не открыта" if n > OPENED else "не сдано", "", True))
+        lines.append(f"| {n} | {pair} | {name} | {state} | {detail} |")
     report = "\n".join(lines)
     print(report)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
